@@ -66,7 +66,7 @@
     <div class="row mt-3">
         <div class="col-md-4">
             <label for="tipo_pagamento_detalhado" class="form-label">Tipo de Pagamento</label>
-            <select name="tipo_pagamento_detalhado" id="tipo_pagamento_detalhado" class="form-select">
+            <select name="tipo_pagamento" id="tipo_pagamento_detalhado" class="form-select">
                 <option value="">Selecione o tipo</option>
                 <option value="cartao_credito">Cartão de Crédito</option>
                 <option value="cartao_debito">Cartão de Débito</option>

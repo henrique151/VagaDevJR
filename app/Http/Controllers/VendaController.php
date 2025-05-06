@@ -13,7 +13,6 @@ class VendaController extends Controller
 {
     public function criar()
     {
-
         $clientes = Usuario::all();
         $produtos = Produto::all();
 
@@ -49,6 +48,7 @@ class VendaController extends Controller
             'produto_id' => 'required|exists:produtos,id',
             'quantidade' => 'required|integer|min:1',
             'preco_unitario' => 'required|numeric|min:0',
+            'tipo_pagamento' => 'required|string',
         ]);
 
         $subtotal = $request->quantidade * $request->preco_unitario;
@@ -83,33 +83,32 @@ class VendaController extends Controller
         return redirect()->route('vendas.edit', $vendaId)->with('success', 'Item excluído e valor total atualizado.');
     }
 
-
     public function updateMultiplos(Request $request, $vendaId)
     {
-    $venda = Venda::findOrFail($vendaId);
-    $novoValorTotal = 0;
+        $venda = Venda::findOrFail($vendaId);
+        $novoValorTotal = 0;
 
-    foreach ($request->itens as $itemData) {
-        $item = \App\Models\VendaItem::find($itemData['id']);
+        foreach ($request->itens as $itemData) {
+            $item = \App\Models\VendaItem::find($itemData['id']);
 
-        if (!$item) continue;
+            if (!$item) continue;
 
-        if (isset($itemData['remover']) && $itemData['remover'] == '1') {
-            $item->delete();
-        } else {
-            $preco = floatval($itemData['preco_unitario']);
-            $quantidade = intval($itemData['quantidade']);
-            $subtotal = $preco * $quantidade;
-            $novoValorTotal += $subtotal;
+            if (isset($itemData['remover']) && $itemData['remover'] == '1') {
+                $item->delete();
+            } else {
+                $preco = floatval($itemData['preco_unitario']);
+                $quantidade = intval($itemData['quantidade']);
+                $subtotal = $preco * $quantidade;
+                $novoValorTotal += $subtotal;
 
-            $item->update([
-                'produto_id' => $itemData['produto_id'],
-                'quantidade' => $quantidade,
-                'preco_unitario' => $preco,
-                'subtotal' => $subtotal,
-            ]);
+                $item->update([
+                    'produto_id' => $itemData['produto_id'],
+                    'quantidade' => $quantidade,
+                    'preco_unitario' => $preco,
+                    'subtotal' => $subtotal,
+                ]);
+            }
         }
-    }
 
         // Recalcula o valor total somando os subtotais dos itens restantes
         $novoValorTotal = $venda->itens()->sum('subtotal');
@@ -139,7 +138,6 @@ class VendaController extends Controller
 
         return redirect()->route('vendas.index');
     }
-         
 
     public function salvar(Request $request)
     {
@@ -151,34 +149,37 @@ class VendaController extends Controller
 
         $valorTotal = 0;
         foreach ($itens as $item) {
-            $valorTotal += $item['preco_final'];  
+            $valorTotal += $item['preco_final'];
         }
 
         // Iniciar transação
         DB::beginTransaction();
-        $formaPagamento = $request->input('forma_pagamento'); 
-
+        $formaPagamento = $request->input('forma_pagamento');
+        $tipoPagamento = $request->input('tipo_pagamento');
+        
         if (!$formaPagamento) {
             return back()->with('erro', 'A forma de pagamento não foi informada.');
         }
 
         try {
-        
+            // Criar a venda com tipo_pagamento
             $venda = Venda::create([
-                'cliente_id' => $request->input('cliente_id'), // Verifique se o cliente_id está correto
+                'cliente_id' => $request->input('cliente_id'),
                 'valor_total' => $valorTotal,
-                'forma_pagamento' => $formaPagamento,  // Defina a forma de pagamento conforme necessário
+                'forma_pagamento' => $formaPagamento,
+                'tipo_pagamento' => $tipoPagamento,
             ]);
 
+            // Armazenar os itens
             foreach ($itens as $item) {
-                $precoUnitario = $item['preco_inicial']; 
+                $precoUnitario = $item['preco_inicial'];
                 $quantidade = $item['quantidade'];
-                $subtotal = $precoUnitario * $quantidade; 
+                $subtotal = $precoUnitario * $quantidade;
 
                 VendaItem::create([
                     'venda_id' => $venda->id,
-                    'produto_id' => $item['produto_id'], // Certifique-se que 'produto_id' existe no array
-                    'quantidade' => $item['quantidade'], // Verifique se a quantidade existe
+                    'produto_id' => $item['produto_id'],
+                    'quantidade' => $item['quantidade'],
                     'preco_unitario' => $precoUnitario,
                     'subtotal' => $subtotal,
                 ]);
@@ -189,7 +190,6 @@ class VendaController extends Controller
             return redirect()->route('vendas.criar')->with('sucesso', 'Venda salva com sucesso!');
         } catch (\Exception $e) {
             DB::rollBack();
-            dd($e->getMessage());  
             return back()->with('erro', 'Erro ao salvar a venda: ' . $e->getMessage());
         }
     }

@@ -4,9 +4,20 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+// app/Models/Venda.php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
 class Venda extends Model
 {
-    protected $fillable = ['cliente_id', 'valor_total', 'forma_pagamento'];
+    protected $fillable = [
+        'cliente_id',
+        'valor_total',
+        'forma_pagamento',
+        'tipo_pagamento',  
+    ];
 
     public function cliente()
     {
@@ -21,5 +32,5 @@ class Venda extends Model
     public function parcelas() {
         return $this->hasMany(Parcela::class);
     }
-
 }
+
