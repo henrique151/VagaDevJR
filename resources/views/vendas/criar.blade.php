@@ -1,132 +1,136 @@
 @extends('layouts.app')
 
 @section('content')
+
 <div class="container">
     <h2>Cadastro de Venda</h2>
 
-    @if(session('sucesso'))
-        <div class="alert alert-success">{{ session('sucesso') }}</div>
-    @endif
+@if(session('sucesso'))
+    <div class="alert alert-success">{{ session('sucesso') }}</div>
+@endif
 
-    <form action="{{ route('vendas.salvar') }}" method="POST" id="form-venda">
-        @csrf
-        <input type="hidden" name="itens" id="itens-json">
-        <input type="hidden" name="parcelas" id="inputParcelas">
-        <input type="hidden" name="tipo_pagamento" id="inputTipoPagamento">
+<form action="{{ route('vendas.salvar') }}" method="POST" id="form-venda">
+    @csrf
+    <input type="hidden" name="itens" id="itens-json">
+    <input type="hidden" name="parcelas" id="inputParcelas">
+    <input type="hidden" name="tipo_pagamento" id="inputTipoPagamento">
 
-        <!-- Cliente -->
-        <div class="form-group">
-            <label for="cliente_id">Cliente</label>
-            <select name="cliente_id" id="cliente_id" class="form-control">
-                <option value="">Selecione um Cliente</option>
-                @foreach($clientes as $cliente)
-                    <option value="{{ $cliente->id }}">{{ $cliente->nome }}</option>
-                @endforeach
+    <!-- Cliente -->
+    <div class="form-group">
+        <label for="cliente_id">Cliente</label>
+        <select name="cliente_id" id="cliente_id" class="form-control">
+            <option value="">Selecione um Cliente</option>
+            @foreach($clientes as $cliente)
+                <option value="{{ $cliente->id }}">{{ $cliente->nome }}</option>
+            @endforeach
+        </select>
+    </div>
+
+    <!-- Itens da Venda -->
+    <h4 class="mt-4">Itens da Venda</h4>
+    <table class="table" id="itens-venda">
+        <thead>
+            <tr>
+                <th>Produto</th>
+                <th>Quantidade</th>
+                <th>Preço Unitário</th>
+                <th>Preço Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>
+                    <select name="produto_id" class="form-control produto">
+                        <option value="">Selecione um Produto</option>
+                        @foreach($produtos as $produto)
+                             <option value="{{ $produto->id }}" data-preco="{{ $produto->preco }}">{{ $produto->nome }}</option>
+                        @endforeach
+                    </select>
+                </td>
+                <td><input type="number" name="quantidade" class="form-control quantidade" value="1"></td>
+                <td><input type="number" name="preco_unitario" class="form-control preco_unitario" step="0.01"></td>
+                <td><input type="text" class="form-control subtotal" readonly></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <button type="button" class="btn btn-primary" id="btn-adicionar-item">Adicionar Item</button>
+
+    <h4 class="mt-4">Itens Adicionados:</h4>
+    <ul id="itens-adicionados" class="list-group mb-4"></ul>
+
+    <!-- Pagamento -->
+    <h3 class="mt-5">Pagamento</h3>
+
+    <!-- Tipo de Pagamento (cartão, boleto, etc) -->
+    <div class="row mt-3">
+        <div class="col-md-4">
+            <label for="tipo_pagamento_detalhado" class="form-label">Tipo de Pagamento</label>
+            <select name="tipo_pagamento_detalhado" id="tipo_pagamento_detalhado" class="form-select">
+                <option value="">Selecione o tipo</option>
+                <option value="cartao_credito">Cartão de Crédito</option>
+                <option value="cartao_debito">Cartão de Débito</option>
+                <option value="boleto">Boleto</option>
+                <option value="transferencia">Transferência</option>
+                <option value="dinheiro">Dinheiro</option>
             </select>
         </div>
+    </div>
 
-        <!-- Itens da Venda -->
-        <h4 class="mt-4">Itens da Venda</h4>
-        <table class="table" id="itens-venda">
+    <!-- Forma de Pagamento (à vista, parcelado, personalizado) -->
+    <div class="row mt-3">
+        <div class="col-md-4">
+            <label for="forma_pagamento">Forma de Pagamento</label>
+            <select name="forma_pagamento" id="forma_pagamento" class="form-select" required>
+                <option value="">Selecione uma forma de pagamento</option>
+                <option value="avista">À Vista</option>
+                <option value="parcelado">Parcelado</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Se parcelado: gerar parcelas -->
+    <div id="boxParcelas" class="mt-4" style="display: none;">
+        <div class="row">
+            <div class="col-md-2">
+                <label>Qtd. Parcelas</label>
+                <input type="number" min="1" id="qtdParcelas" class="form-control">
+            </div>
+            <div class="col-md-4">
+                <label>1º Vencimento</label>
+                <input type="date" id="dataVencimentoInicial" class="form-control">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="button" class="btn btn-secondary" id="gerarParcelas">Gerar Parcelas</button>
+            </div>
+        </div>
+
+        <table class="table table-bordered mt-3">
             <thead>
                 <tr>
-                    <th>Produto</th>
-                    <th>Quantidade</th>
-                    <th>Preço Unitário</th>
-                    <th>Preço Total</th>
+                    <th>#</th>
+                    <th>Data de Vencimento</th>
+                    <th>Valor</th>
+                    <th>Tipo de Pagamento</th>
+                    <th>Ações</th>
                 </tr>
             </thead>
-            <tbody>
-                <tr>
-                    <td>
-                       <select name="produto_id" class="form-control produto">
-                            <option value="">Selecione um Produto</option>
-                            @foreach($produtos as $produto)
-                                <option value="{{ $produto->id }}" data-preco="{{ $produto->preco }}">{{ $produto->nome }}</option>
-                            @endforeach
-                        </select>
-                    </td>
-                    <td><input type="number" name="quantidade" class="form-control quantidade" value="1"></td>
-                    <td><input type="number" name="preco_unitario" class="form-control preco_unitario" step="0.01"></td>
-                    <td><input type="text" class="form-control subtotal" readonly></td>
-                </tr>
-            </tbody>
+            <tbody id="listaParcelas"></tbody>
         </table>
-
-        <button type="button" class="btn btn-primary" id="btn-adicionar-item">Adicionar Item</button>
-
-        <h4 class="mt-4">Itens Adicionados:</h4>
-        <ul id="itens-adicionados" class="list-group mb-4"></ul>
-
-        <!-- Pagamento -->
-        <h3 class="mt-5">Pagamento</h3>
-
-        <!-- Tipo de Pagamento (cartão, boleto, etc) -->
-        <div class="row mt-3">
-            <div class="col-md-4">
-                <label for="tipo_pagamento_detalhado" class="form-label">Tipo de Pagamento</label>
-                <select name="tipo_pagamento_detalhado" id="tipo_pagamento_detalhado" class="form-select">
-                    <option value="">Selecione o tipo</option>
-                    <option value="cartao_credito">Cartão de Crédito</option>
-                    <option value="cartao_debito">Cartão de Débito</option>
-                    <option value="boleto">Boleto</option>
-                    <option value="transferencia">Transferência</option>
-                    <option value="dinheiro">Dinheiro</option>
-                </select>
-            </div>
-        </div>
-
-        <!-- Forma de Pagamento (à vista, parcelado, personalizado) -->
-        <div class="row mt-3">
-            <div class="col-md-4">
-                <label for="forma_pagamento">Forma de Pagamento</label>
-                <select name="forma_pagamento" id="forma_pagamento" class="form-select" required>
-                    <option value="">Selecione uma forma de pagamento</option>
-                    <option value="avista">À Vista</option>
-                    <option value="parcelado">Parcelado</option>
-                </select>
-            </div>
-        </div>
-
-        <!-- Se parcelado: gerar parcelas -->
-        <div id="boxParcelas" class="mt-4" style="display: none;">
-            <div class="row">
-                <div class="col-md-2">
-                    <label>Qtd. Parcelas</label>
-                    <input type="number" min="1" id="qtdParcelas" class="form-control">
-                </div>
-                <div class="col-md-4">
-                    <label>1º Vencimento</label>
-                    <input type="date" id="dataVencimentoInicial" class="form-control">
-                </div>
-                <div class="col-md-2 d-flex align-items-end">
-                    <button type="button" class="btn btn-secondary" id="gerarParcelas">Gerar Parcelas</button>
-                </div>
-            </div>
-
-            <table class="table table-bordered mt-3">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Data de Vencimento</th>
-                        <th>Valor</th>
-                        <th>Tipo de Pagamento</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody id="listaParcelas"></tbody>
-            </table>
-        </div>
+    </div>
 
 
 
-        <button type="submit" class="btn btn-success" id="btn-salvar-venda">Salvar Venda</button>
-        <a href="{{ url('/') }}" class="btn btn-primary">Voltar</a>
-    </form>
+    <button type="submit" class="btn btn-success" id="btn-salvar-venda">Salvar Venda</button>
+    <a href="{{ url('/') }}" class="btn btn-primary">Voltar</a>
+</form>
+
 </div>
 
 <!-- Scripts -->
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script src="js/venda.js"></script>
@@ -134,6 +138,8 @@
 <script src="js/itens.js"></script>
 
 <script>
+
+
 let parcelas = [];
 function calcularTotalVenda() {
     let total = 0;
@@ -354,7 +360,8 @@ $(document).ready(function() {
         $('#itens-json').val(JSON.stringify(itens));
     }
 
-        $('#btn-adicionar-item').click(function() {
+    $('#btn-adicionar-item').click(function() {
+        const clienteId = $('#cliente_id').val();
         const tr = $('#itens-venda tbody tr:first');
         const produtoId = tr.find('.produto').val();
         const produtoNome = tr.find('.produto option:selected').text();
@@ -386,17 +393,9 @@ $(document).ready(function() {
         tr.find('.subtotal').val('');
     }
 
-        $(document).on('change', '.produto', function () {
-        const preco = $(this).find('option:selected').data('preco');
-        const tr = $(this).closest('tr');
-        tr.find('.preco_unitario').val(preco ? preco.toFixed(2) : '');
-        tr.find('.quantidade').trigger('change'); 
-    });
-
     $(document).on('input change', '.quantidade, .preco_unitario, .produto', function() {
         calcularSubtotal();
     });
-
 
     $(document).on('click', '.btn-remove-item', function() {
         $(this).closest('li').remove();
@@ -413,7 +412,7 @@ $(document).ready(function() {
         item.remove();
         atualizarItensJson();
     });
-    
 });
 </script>
-@endsection  
+
+@endsection 
