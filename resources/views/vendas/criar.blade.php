@@ -119,8 +119,6 @@
         </table>
     </div>
 
-
-
     <button type="submit" class="btn btn-success" id="btn-salvar-venda">Salvar Venda</button>
     <a href="{{ url('/') }}" class="btn btn-primary">Voltar</a>
 </form>
@@ -133,13 +131,9 @@
 
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-<script src="js/venda.js"></script>
-<script src="js/formulario.js"></script>
-<script src="js/itens.js"></script>
+
 
 <script>
-
-
 let parcelas = [];
 function calcularTotalVenda() {
     let total = 0;
@@ -337,6 +331,13 @@ $(document).ready(function() {
     let itemCount = 0;
 
     $('#cliente_id, .produto').select2({ width: '100%' });
+
+    $('.produto').on('change', function () {
+        const preco = $(this).find('option:selected').data('preco');
+        const tr = $(this).closest('tr');
+        tr.find('.preco_unitario').val(preco);
+        tr.find('.quantidade').trigger('change'); // Força o recálculo do subtotal
+    });
 
     function calcularSubtotal() {
         $('#itens-venda tbody tr').each(function() {
