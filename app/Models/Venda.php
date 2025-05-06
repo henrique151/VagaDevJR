@@ -21,4 +21,5 @@ class Venda extends Model
     public function parcelas() {
         return $this->hasMany(Parcela::class);
     }
+
 }

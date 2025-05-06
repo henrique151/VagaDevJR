@@ -10,45 +10,50 @@
         <table class="table table-bordered">
             <thead>
                 <tr>
-                    <th>#</th>
+                    <th>ID da Venda</th>
+                    <th>ID do Cliente</th>
                     <th>Cliente</th>
+                    <th>CPF</th> 
+                    <th>RG</th>
                     <th>Data</th>
                     <th>Itens</th>
-                    <th>Total</th>
-                    <th>Pagamento</th>
+                    <th>Valor Total</th>
+                    <th>Ações</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($vendas as $venda)
                     <tr>
                         <td>{{ $venda->id }}</td>
-                        <td>{{ $venda->cliente->nome }}</td>
+                        <td>{{ $venda->cliente->id }}</td> 
+                        <td>{{ $venda->cliente->nome }}</td>                 
+                        <td>{{ $venda->cliente->cpf }}</td> 
+                        <td>{{ $venda->cliente->rg }}</td> 
                         <td>{{ $venda->created_at->format('d/m/Y H:i') }}</td>
                         <td>
-                            <ul>
+                            <ul class="mb-0">
                                 @foreach($venda->itens as $item)
-                                    <li>{{ $item->produto->nome }} - {{ $item->quantidade }} x R${{ number_format($item->preco_final, 2, ',', '.') }}</li>
+                                    <li>
+                                        {{ $item->produto->nome }} - 
+                                        {{ $item->quantidade }} x 
+                                        R$ {{ number_format($item->preco_unitario, 2, ',', '.') }}
+                                    </li>
                                 @endforeach
                             </ul>
                         </td>
                         <td>
-                            R$ {{ number_format($venda->itens->sum('preco_final'), 2, ',', '.') }}
+                            R$ {{ number_format($venda->valor_total, 2, ',', '.') }}
                         </td>
                         <td>
-                            @if($venda->parcelas->count() > 0)
-                                Parcelado ({{ $venda->parcelas->count() }}x)
-                                <ul>
-                                    @foreach($venda->parcelas as $parcela)
-                                        <li>
-                                            {{ \Carbon\Carbon::parse($parcela->vencimento)->format('d/m/Y') }} - 
-                                            R$ {{ number_format($parcela->valor, 2, ',', '.') }} - 
-                                            {{ ucfirst(str_replace('_', ' ', $parcela->tipo_pagamento)) }}
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            @else
-                                À Vista
-                            @endif
+                            <!-- Botão Editar -->
+                            <a href="{{ route('vendas.edit', $venda->id) }}" class="btn btn-sm btn-warning">Editar</a>
+
+                            <!-- Formulário Excluir -->
+                            <form action="{{ route('vendas.destroy', $venda->id) }}" method="POST" style="display:inline-block;">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Tem certeza que deseja excluir esta venda?')">Excluir</button>
+                            </form>
                         </td>
                     </tr>
                 @endforeach
@@ -56,6 +61,7 @@
         </table>
     @endif
 
-    <a href="{{ route('vendas.create') }}" class="btn btn-primary">Nova Venda</a>
+    <a href="{{ route('vendas.criar') }}" class="btn btn-primary">Nova Venda</a>
+    <a href="{{ url('/') }}" class="btn btn-primary">Voltar</a>
 </div>
 @endsection

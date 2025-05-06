@@ -21,3 +21,13 @@ Route::post('/produtos', [ProdutoController::class, 'salvar'])->name('produtos.s
 Route::get('/vendas/criar', [VendaController::class, 'criar'])->name('vendas.criar');
 Route::post('/vendas/salvar', [VendaController::class, 'salvar'])->name('vendas.salvar');
 Route::get('/vendas', [VendaController::class, 'index'])->name('vendas.index');
+Route::get('/vendas/{venda}/edit', [VendaController::class, 'edit'])->name('vendas.edit');
+Route::put('/vendas/{venda}', [VendaController::class, 'update'])->name('vendas.update'); 
+Route::delete('/vendas/{venda}', [VendaController::class, 'destroy'])->name('vendas.destroy');
+Route::put('/vendas/{venda}/itens', [VendaController::class, 'updateMultiplos'])->name('venda_itens.updateMultiplos');
+Route::post('/vendas/itens', [VendaController::class, 'storeItem'])->name('venda_itens.store');
+Route::get('/vendas/itens/{id}/destroy', [VendaController::class, 'destroyItem'])->name('venda_itens.destroy');
+
+
+
+
