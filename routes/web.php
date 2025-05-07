@@ -19,8 +19,8 @@ Route::post('/produtos', [ProdutoController::class, 'salvar'])->name('produtos.s
 
 // Rota de Cadastro de Venda
 Route::get('/vendas/criar', [VendaController::class, 'criar'])->name('vendas.criar');
-Route::post('/vendas/salvar', [VendaController::class, 'salvar'])->name('vendas.salvar');
 Route::get('/vendas', [VendaController::class, 'index'])->name('vendas.index');
+Route::post('/vendas', [VendaController::class, 'store'])->name('vendas.store');
 Route::get('/vendas/{venda}/edit', [VendaController::class, 'edit'])->name('vendas.edit');
 Route::put('/vendas/{venda}', [VendaController::class, 'update'])->name('vendas.update'); 
 Route::delete('/vendas/{venda}', [VendaController::class, 'destroy'])->name('vendas.destroy');

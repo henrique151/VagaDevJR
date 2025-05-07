@@ -131,6 +131,7 @@ function atualizarTabelaParcelas() {
         `;
     });
     document.getElementById("inputParcelas").value = JSON.stringify(parcelas);
+    $("#itens-json").val(JSON.stringify(itens));
 }
 
 function editarTipoPagamento(index, tipoPagamento) {

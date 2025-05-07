@@ -2,11 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class VendaItem extends Model
 {
-    protected $table = 'venda_itens';
+    use HasFactory;
 
     protected $fillable = [
         'venda_id',
@@ -15,8 +16,6 @@ class VendaItem extends Model
         'preco_unitario',
         'subtotal',
     ];
-
-    
 
     public function venda()
     {
@@ -27,6 +26,4 @@ class VendaItem extends Model
     {
         return $this->belongsTo(Produto::class);
     }
-
-    
 }

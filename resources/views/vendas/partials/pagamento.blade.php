@@ -1,3 +1,4 @@
+<input type="hidden" name="parcelas" id="inputParcelas">
 <h3 class="mt-5">Pagamento</h3>
 <div class="row mt-3">
     <div class="col-md-4">
@@ -52,3 +53,4 @@
         <tbody id="listaParcelas"></tbody>
     </table>
 </div>
+

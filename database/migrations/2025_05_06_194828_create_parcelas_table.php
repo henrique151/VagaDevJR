@@ -10,10 +10,10 @@ return new class extends Migration
     {
         Schema::create('parcelas', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('venda_id')->constrained()->onDelete('cascade'); // Exclusão em cascata
+            $table->foreignId('venda_id')->constrained()->onDelete('cascade'); 
             $table->decimal('valor', 10, 2);
             $table->date('vencimento');
-            $table->enum('tipo_pagamento', ['credito', 'debito', 'dinheiro']);
+            $table->string('tipo_pagamento');
             $table->timestamps();
         });
     }

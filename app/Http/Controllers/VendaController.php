@@ -7,122 +7,41 @@ use App\Models\Usuario;
 use App\Models\Produto;
 use App\Models\Venda;
 use App\Models\VendaItem;
+use App\Models\Parcela;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException; // Importar se usar withErrors na mão
 
 class VendaController extends Controller
 {
-    public function criar()
+    public function criar(Request $request)
     {
         $clientes = Usuario::all();
         $produtos = Produto::all();
+ 
+        $itens = json_decode($request->input('itens_data', '[]'), true) ?? [];
+        $parcelas = json_decode($request->input('parcelas_data', '[]'), true) ?? [];
 
-        return view('vendas.criar', compact('clientes', 'produtos'));
+        // $dadosParcelas = json_decode(old('parcelas_data'), true) ?? [];
+        // $dadosItens = json_decode(old('itens_data'), true) ?? [];
+
+        return view('vendas.criar', compact('clientes', 'produtos', 'parcelas', 'itens'));
     }
 
     public function index()
     {
         $vendas = Venda::with(['cliente', 'itens.produto', 'parcelas'])->latest()->get();
-
         return view('vendas.index', compact('vendas'));
-    }
-
-    public function update(Request $request, $id)
-    {
-        // Validar se o cliente_id foi fornecido
-        $request->validate([
-            'cliente_id' => 'required|exists:usuarios,id',  // Verifica se o cliente existe
-        ]);
-
-        // Atualizar a venda com o cliente encontrado
-        $venda = Venda::findOrFail($id);
-        $venda->cliente_id = $request->input('cliente_id');  // Atribuir o cliente_id diretamente
-        $venda->save();
-
-        return redirect()->route('vendas.index')->with('success', 'Venda atualizada com sucesso.');
-    }
-
-    public function storeItem(Request $request)
-    {
-        $request->validate([
-            'venda_id' => 'required|exists:vendas,id',
-            'produto_id' => 'required|exists:produtos,id',
-            'quantidade' => 'required|integer|min:1',
-            'preco_unitario' => 'required|numeric|min:0',
-            'tipo_pagamento' => 'required|string',
-        ]);
-
-        $subtotal = $request->quantidade * $request->preco_unitario;
-
-        VendaItem::create([
-            'venda_id' => $request->venda_id,
-            'produto_id' => $request->produto_id,
-            'quantidade' => $request->quantidade,
-            'preco_unitario' => $request->preco_unitario,
-            'subtotal' => $subtotal,
-        ]);
-
-        // Atualiza o valor total
-        $venda = Venda::findOrFail($request->venda_id);
-        $venda->valor_total = $venda->itens()->sum('subtotal');
-        $venda->save();
-
-        return redirect()->route('vendas.edit', $request->venda_id)->with('success', 'Produto adicionado com sucesso.');
-    }
-
-    public function destroyItem($id)
-    {
-        $item = VendaItem::findOrFail($id);
-        $vendaId = $item->venda_id;
-        $item->delete();
-
-        // Atualiza o valor total
-        $venda = Venda::findOrFail($vendaId);
-        $venda->valor_total = $venda->itens()->sum('subtotal');
-        $venda->save();
-
-        return redirect()->route('vendas.edit', $vendaId)->with('success', 'Item excluído e valor total atualizado.');
-    }
-
-    public function updateMultiplos(Request $request, $vendaId)
-    {
-        $venda = Venda::findOrFail($vendaId);
-        $novoValorTotal = 0;
-
-        foreach ($request->itens as $itemData) {
-            $item = \App\Models\VendaItem::find($itemData['id']);
-
-            if (!$item) continue;
-
-            if (isset($itemData['remover']) && $itemData['remover'] == '1') {
-                $item->delete();
-            } else {
-                $preco = floatval($itemData['preco_unitario']);
-                $quantidade = intval($itemData['quantidade']);
-                $subtotal = $preco * $quantidade;
-                $novoValorTotal += $subtotal;
-
-                $item->update([
-                    'produto_id' => $itemData['produto_id'],
-                    'quantidade' => $quantidade,
-                    'preco_unitario' => $preco,
-                    'subtotal' => $subtotal,
-                ]);
-            }
-        }
-
-        // Recalcula o valor total somando os subtotais dos itens restantes
-        $novoValorTotal = $venda->itens()->sum('subtotal');
-        $venda->valor_total = $novoValorTotal;
-        $venda->save();
-
-        return redirect()->route('vendas.edit', $vendaId)->with('success', 'Itens atualizados e valor total recalculado.');
     }
 
     public function edit($id)
     {
-        $venda = Venda::find($id);
+        $venda = Venda::with('parcelas', 'itens.produto')->findOrFail($id); // Eager load itens também
+
         $clientes = Usuario::all();
         $produtos = Produto::all();
+
+       
 
         return view('vendas.edit', [
             'venda' => $venda,
@@ -131,66 +50,308 @@ class VendaController extends Controller
         ]);
     }
 
-    public function destroy($id)
+    public function update(Request $request, $id)
     {
-        $venda = Venda::findOrFail($id);
-        $venda->delete();
+         $request->validate([
+             'cliente_id' => 'required|exists:usuarios,id',
+             'tipo_pagamento' => 'required|string',
+             'forma_pagamento' => 'required|string',
+             'parcelas_data' => 'nullable|json',
+         ]);
 
-        return redirect()->route('vendas.index');
+         $venda = Venda::with('parcelas')->findOrFail($id);
+
+         DB::beginTransaction();
+
+         try {
+             $venda->cliente_id = $request->input('cliente_id');
+             $venda->tipo_pagamento = $request->input('tipo_pagamento');
+             $venda->forma_pagamento = $request->input('forma_pagamento');
+             // O valor_total é atualizado pelos métodos de item ou recalculado no store/updateMultiplos
+             $venda->save();
+
+             // --- Atualiza Parcelas ---
+             // Exclui as parcelas existentes associadas a esta venda
+             $venda->parcelas()->delete();
+
+             // Cria novas parcelas se a forma for 'parcelado' e dados de parcelas foram enviados
+             if ($request->forma_pagamento === 'parcelado' && $request->filled('parcelas_data')) {
+                 $parcelas = json_decode($request->input('parcelas_data'), true);
+
+                 // Valida o conteúdo das parcelas decodificadas antes de criar
+                 if (is_array($parcelas)) {
+                      $request->validate([
+                          'parcelas_data' => 'required|array', // Re-valida que é array
+                          'parcelas_data.*.numero' => 'required|integer|min:1',
+                          'parcelas_data.*.valor' => 'required|numeric|min:0',
+                          'parcelas_data.*.vencimento' => 'required|date_format:Y-m-d',
+                          'parcelas_data.*.tipo_pagamento' => 'required|string',
+                          'parcelas_data.*.status' => 'nullable|string',
+                      ]);
+
+                      foreach ($parcelas as $p) {
+                          $venda->parcelas()->create([
+                              'numero' => $p['numero'],
+                              'valor' => $p['valor'],
+                              'vencimento' => $p['vencimento'], // Já deve vir no formato YYYY-MM-DD
+                              'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento, // Use o tipo da parcela ou o geral
+                              'status' => $p['status'] ?? 'aberto',
+                          ]);
+                      }
+                 }
+             }
+             // --- Fim Atualiza Parcelas ---
+
+             DB::commit();
+             return redirect()->route('vendas.index')->with('success', 'Venda atualizada com sucesso.');
+
+         } catch (\Exception $e) {
+             DB::rollback();
+             \Log::error('Erro ao atualizar venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
+              // Retorna com os erros e input antigo
+             return back()->withErrors(['erro_salvar' => 'Erro ao atualizar venda: ' . $e->getMessage()])->withInput();
+         }
     }
 
-    public function salvar(Request $request)
+    public function store(Request $request)
     {
-        $itens = json_decode($request->input('itens'), true);
+    // Primeiro, validar apenas os campos básicos e formato JSON
+        $request->validate([
+            'cliente_id' => 'required|exists:usuarios,id',
+            'itens_data' => 'required|json',
+            'forma_pagamento' => 'required|string',
+            'tipo_pagamento' => 'required|string',
+            'parcelas_data' => 'nullable|json',
+        ]);
 
-        if (!$itens || count($itens) === 0) {
-            return back()->with('erro', 'Nenhum item foi adicionado à venda.');
-        }
+        // Agora sim, decodifica os JSONs
+        $itens = json_decode($request->input('itens_data'), true);
+        $parcelas = json_decode($request->input('parcelas_data'), true) ?? [];
 
-        $valorTotal = 0;
-        foreach ($itens as $item) {
-            $valorTotal += $item['preco_final'];
-        }
+        // Substitui os campos no $request para que a próxima validação funcione
+        $request->merge([
+            'itens_data' => $itens,
+            'parcelas_data' => $parcelas,
+        ]);
+    
+        $request->validate([
+        'itens_data' => 'required|array|min:1',
+        'itens_data.*.produto_id' => 'required|exists:produtos,id',
+        'itens_data.*.quantidade' => 'required|integer|min:1',
+        'itens_data.*.preco_final' => 'required|numeric|min:0',
 
-        // Iniciar transação
+        'parcelas_data' => 'nullable|array',
+        'parcelas_data.*.numero' => 'required|integer|min:1',
+        'parcelas_data.*.valor' => 'required|numeric|min:0',
+        'parcelas_data.*.vencimento' => 'required|date_format:Y-m-d',
+        'parcelas_data.*.tipo_pagamento' => 'required|string',
+        'parcelas_data.*.status' => 'nullable|string',
+    ]);
+    
+
+
         DB::beginTransaction();
-        $formaPagamento = $request->input('forma_pagamento');
-        $tipoPagamento = $request->input('tipo_pagamento');
-        
-        if (!$formaPagamento) {
-            return back()->with('erro', 'A forma de pagamento não foi informada.');
-        }
 
         try {
-            // Criar a venda com tipo_pagamento
+            // Calcular o valor total a partir dos itens recebidos
+            // Agora que o JS envia preco_final como preço unitário, o cálculo no backend está correto.
+            $totalVenda = 0;
+            if (!empty($itens)) { // Verifica se $itens não está vazio antes de iterar
+                 foreach ($itens as $itemData) {
+                     $subtotal = $itemData['quantidade'] * $itemData['preco_final']; // quantidade * preco_unitario_final
+                     $totalVenda += $subtotal;
+                 }
+            }
+
+
+            // Criar a venda principal
             $venda = Venda::create([
-                'cliente_id' => $request->input('cliente_id'),
-                'valor_total' => $valorTotal,
-                'forma_pagamento' => $formaPagamento,
-                'tipo_pagamento' => $tipoPagamento,
+                'cliente_id' => $request->cliente_id,
+                'forma_pagamento' => $request->forma_pagamento,
+                'tipo_pagamento' => $request->tipo_pagamento,
+                'valor_total' => $totalVenda, // Use o total calculado
             ]);
 
-            // Armazenar os itens
-            foreach ($itens as $item) {
-                $precoUnitario = $item['preco_inicial'];
-                $quantidade = $item['quantidade'];
-                $subtotal = $precoUnitario * $quantidade;
+            // Criar itens da venda usando o relacionamento $venda->itens()
+             if (!empty($itens)) { // Verifica se $itens não está vazio antes de iterar
+                 foreach ($itens as $itemData) {
+                     $venda->itens()->create([
+                         'produto_id' => $itemData['produto_id'],
+                         'quantidade' => $itemData['quantidade'],
+                         'preco_unitario' => $itemData['preco_final'], // Salva o preço unitário final
+                         'subtotal' => $itemData['quantidade'] * $itemData['preco_final'], // Salva o subtotal correto
+                     ]);
+                 }
+             }
 
-                VendaItem::create([
-                    'venda_id' => $venda->id,
-                    'produto_id' => $item['produto_id'],
-                    'quantidade' => $item['quantidade'],
-                    'preco_unitario' => $precoUnitario,
-                    'subtotal' => $subtotal,
-                ]);
+
+            // Criar parcelas (se existirem e forma de pagamento for 'parcelado')
+            if ($request->forma_pagamento === 'parcelado' && !empty($parcelas)) {
+                 // A validação do conteúdo das parcelas já aconteceu acima.
+                foreach ($parcelas as $p) {
+                    $venda->parcelas()->create([
+                        'numero' => $p['numero'],
+                        'valor' => $p['valor'],
+                        'vencimento' => $p['vencimento'], // Já deve vir no formato YYYY-MM-DD do JS
+                        'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento, // Use o tipo da parcela ou o geral
+                        'status' => $p['status'] ?? 'aberto',
+                    ]);
+                }
             }
 
             DB::commit();
+            // Redireciona para a lista de vendas com mensagem de sucesso
+            return redirect()->route('vendas.index')->with('success', 'Venda registrada com sucesso.');
 
-            return redirect()->route('vendas.criar')->with('sucesso', 'Venda salva com sucesso!');
         } catch (\Exception $e) {
-            DB::rollBack();
-            return back()->with('erro', 'Erro ao salvar a venda: ' . $e->getMessage());
+            DB::rollback();
+            // Loga o erro para debug no servidor
+            \Log::error('Erro ao salvar venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
+             // Retorna para a página anterior com uma mensagem de erro genérica e os dados antigos
+            return back()->withErrors(['erro_salvar' => 'Erro interno ao registrar venda: ' . $e->getMessage()])->withInput();
         }
+    }
+
+     public function storeItem(Request $request)
+     {
+         // ... (código para adicionar um item individualmente, parece ok) ...
+         $request->validate([
+             'venda_id' => 'required|exists:vendas,id',
+             'produto_id' => 'required|exists:produtos,id',
+             'quantidade' => 'required|integer|min:1',
+             'preco_unitario' => 'required|numeric|min:0',
+         ]);
+
+         $venda = Venda::findOrFail($request->venda_id);
+
+         DB::beginTransaction();
+         try {
+             $subtotal = $request->quantidade * $request->preco_unitario;
+
+             $item = $venda->itens()->create([ // Capture o item criado se precisar
+                 'produto_id' => $request->produto_id,
+                 'quantidade' => $request->quantidade,
+                 'preco_unitario' => $request->preco_unitario,
+                 'subtotal' => $subtotal,
+             ]);
+
+             // Recalcula o total da venda principal
+             $venda->valor_total = $venda->itens()->sum('subtotal'); // Soma todos os subtotais dos itens da venda
+             $venda->save();
+
+             DB::commit();
+             // Redireciona de volta para a tela de edição da venda
+             return redirect()->route('vendas.edit', $request->venda_id)->with('success', 'Produto adicionado à venda.');
+
+         } catch (\Exception $e) {
+             DB::rollback();
+             \Log::error('Erro ao adicionar item à venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
+             return back()->withErrors(['erro_item' => 'Erro ao adicionar item: ' . $e->getMessage()])->withInput();
+         }
+     }
+
+    public function destroyItem($id)
+    {
+         // ... (código para excluir um item individualmente, parece ok) ...
+         $item = VendaItem::with('venda')->findOrFail($id);
+         $venda = $item->venda;
+
+         DB::beginTransaction();
+         try {
+             $item->delete(); // Exclui o item
+
+             // Recalcula o total da venda principal
+             if ($venda) { // Verifica se a venda pai ainda existe
+                 $venda->valor_total = $venda->itens()->sum('subtotal'); // Soma os subtotais restantes
+                 $venda->save();
+             }
+
+             DB::commit();
+             // Redireciona de volta para a tela de edição da venda
+             return redirect()->route('vendas.edit', $venda->id)->with('success', 'Item excluído e total atualizado.');
+
+         } catch (\Exception $e) {
+             DB::rollback();
+             \Log::error('Erro ao excluir item da venda: ' . $e->getMessage(), ['exception' => $e]);
+             return back()->withErrors(['erro_excluir_item' => 'Erro ao excluir item: ' . $e->getMessage()]);
+         }
+    }
+
+     public function updateMultiplos(Request $request, $vendaId)
+     {
+
+         $venda = Venda::with('itens')->findOrFail($vendaId); // Eager load itens para manipulação local
+
+         $request->validate([
+             'itens' => 'required|array', // Valida que 'itens' é um array (vem direto dos inputs)
+             'itens.*.id' => 'required|exists:venda_itens,id',
+             'itens.*.produto_id' => 'required|exists:produtos,id', // Verifique se o produto existe
+             'itens.*.quantidade' => 'required|integer|min:1',
+             // Assumindo que o input na tela de edição para preço é name="itens[...][preco_unitario]"
+             'itens.*.preco_unitario' => 'required|numeric|min:0',
+             'itens.*.remover' => 'nullable|boolean', // Campo hidden para marcar remoção
+         ]);
+
+         DB::beginTransaction();
+         try {
+             // Iterar sobre os itens recebidos no request
+             foreach ($request->itens as $itemData) {
+                 // Encontrar o item existente na venda carregada ou no BD (find no BD pode ser mais seguro se a coleção carregada não estiver completa)
+                 $item = $venda->itens()->find($itemData['id']); // Use o relacionamento para encontrar no BD
+                 if (!$item) continue; // Pula se o item não for encontrado (ou foi deletado por outra requisição)
+
+                 // Lógica de remoção vs atualização
+                 // O campo 'remover' virá como '0' ou '1' (string) do input hidden
+                 if (isset($itemData['remover']) && (bool)$itemData['remover']) { // Converte para booleano
+                     $item->delete(); // Exclui o item
+                 } else {
+                     // Validações específicas para o item antes de atualizar (já feitas acima pelo validate)
+                     $preco = floatval($itemData['preco_unitario']);
+                     $quantidade = intval($itemData['quantidade']);
+                     $subtotal = $preco * $quantidade;
+
+                     // Atualiza os dados do item existente
+                     $item->update([
+                         'produto_id' => $itemData['produto_id'], // Permite mudar o produto
+                         'quantidade' => $quantidade,
+                         'preco_unitario' => $preco,
+                         'subtotal' => $subtotal,
+                     ]);
+                 }
+             }
+
+             // Recalcular o valor total da venda após todas as operações (atualizações/remoções)
+             // Acessa os itens atualizados/restantes através do relacionamento para somar os subtotais no banco de dados
+             $venda->valor_total = $venda->itens()->sum('subtotal');
+             $venda->save(); // Salva o novo total na venda principal
+
+             DB::commit();
+             return redirect()->route('vendas.edit', $vendaId)->with('success', 'Alterações nos itens salvas com sucesso.');
+
+         } catch (\Exception $e) {
+             DB::rollback();
+             \Log::error('Erro ao atualizar múltiplos itens da venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
+             return back()->withErrors(['erro_atualizar_itens' => 'Erro ao salvar alterações nos itens: ' . $e->getMessage()])->withInput();
+         }
+     }
+
+
+    public function destroy($id)
+    {
+         // ... (código para excluir uma venda, parece ok) ...
+         $venda = Venda::findOrFail($id);
+
+         DB::beginTransaction();
+         try {
+             $venda->delete(); // Exclui a venda principal
+
+             DB::commit();
+             return redirect()->route('vendas.index')->with('success', 'Venda excluída com sucesso.');
+
+         } catch (\Exception $e) {
+             DB::rollback();
+             \Log::error('Erro ao excluir venda: ' . $e->getMessage(), ['exception' => $e]);
+             return back()->withErrors(['erro_excluir_venda' => 'Erro ao excluir venda: ' . $e->getMessage()]);
+         }
     }
 }
