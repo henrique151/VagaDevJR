@@ -10,7 +10,7 @@ use App\Models\VendaItem;
 use App\Models\Parcela;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
-use Illuminate\Validation\ValidationException; // Importar se usar withErrors na mão
+use Illuminate\Validation\ValidationException;
 
 class VendaController extends Controller
 {
@@ -22,26 +22,41 @@ class VendaController extends Controller
         $itens = json_decode($request->input('itens_data', '[]'), true) ?? [];
         $parcelas = json_decode($request->input('parcelas_data', '[]'), true) ?? [];
 
-        // $dadosParcelas = json_decode(old('parcelas_data'), true) ?? [];
-        // $dadosItens = json_decode(old('itens_data'), true) ?? [];
-
         return view('vendas.criar', compact('clientes', 'produtos', 'parcelas', 'itens'));
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $vendas = Venda::with(['cliente', 'itens.produto', 'parcelas'])->latest()->get();
+        $query = Venda::with(['cliente', 'itens.produto']);
+
+        if ($request->filled('cpf')) {
+            $query->whereHas('cliente', function ($q) use ($request) {
+                $q->where('cpf', 'like', '%' . $request->cpf . '%');
+            });
+        }
+
+        if ($request->filled('rg')) {
+            $query->whereHas('cliente', function ($q) use ($request) {
+                $q->where('rg', 'like', '%' . $request->rg . '%');
+            });
+        }
+
+        if ($request->filled('produto')) {
+            $query->whereHas('itens.produto', function ($q) use ($request) {
+                $q->where('nome', 'like', '%' . $request->produto . '%');
+            });
+        }
+
+        $vendas = $query->get();
+
         return view('vendas.index', compact('vendas'));
     }
 
     public function edit($id)
     {
-        $venda = Venda::with('parcelas', 'itens.produto')->findOrFail($id); // Eager load itens também
-
+        $venda = Venda::with('parcelas', 'itens.produto')->findOrFail($id);
         $clientes = Usuario::all();
         $produtos = Produto::all();
-
-       
 
         return view('vendas.edit', [
             'venda' => $venda,
@@ -52,67 +67,147 @@ class VendaController extends Controller
 
     public function update(Request $request, $id)
     {
-         $request->validate([
-             'cliente_id' => 'required|exists:usuarios,id',
-             'tipo_pagamento' => 'required|string',
-             'forma_pagamento' => 'required|string',
-             'parcelas_data' => 'nullable|json',
-         ]);
+        $request->validate([
+            'cliente_id' => 'required|exists:usuarios,id',
+            'tipo_pagamento' => 'required|string',
+            'forma_pagamento' => 'required|string',
+            'parcelas_data' => 'nullable|json',
+        ]);
 
-         $venda = Venda::with('parcelas')->findOrFail($id);
+        $venda = Venda::with(['parcelas', 'itens'])->findOrFail($id);
+        $valorTotalVenda = $venda->itens->sum('subtotal');
 
-         DB::beginTransaction();
+        DB::beginTransaction();
 
-         try {
-             $venda->cliente_id = $request->input('cliente_id');
-             $venda->tipo_pagamento = $request->input('tipo_pagamento');
-             $venda->forma_pagamento = $request->input('forma_pagamento');
-             // O valor_total é atualizado pelos métodos de item ou recalculado no store/updateMultiplos
-             $venda->save();
+        try {
+            // Atualiza os dados básicos da venda
+            $venda->cliente_id = $request->input('cliente_id');
+            $venda->tipo_pagamento = $request->input('tipo_pagamento');
+            $venda->forma_pagamento = $request->input('forma_pagamento');
+            $venda->save();
 
-             // --- Atualiza Parcelas ---
-             // Exclui as parcelas existentes associadas a esta venda
-             $venda->parcelas()->delete();
+            // Gerencia as parcelas de acordo com a forma de pagamento
+            if ($request->forma_pagamento === 'parcelado' && $request->filled('parcelas_data')) {
+                $parcelasNovas = json_decode($request->input('parcelas_data'), true);
+                
+                // Log para debug
+                \Log::info('Parcelas recebidas:', ['parcelas' => $parcelasNovas]);
 
-             // Cria novas parcelas se a forma for 'parcelado' e dados de parcelas foram enviados
-             if ($request->forma_pagamento === 'parcelado' && $request->filled('parcelas_data')) {
-                 $parcelas = json_decode($request->input('parcelas_data'), true);
+                if (is_array($parcelasNovas)) {
+                    // Validação básica das parcelas
+                    foreach ($parcelasNovas as $p) {
+                        if (!isset($p['numero']) || !isset($p['valor']) || !isset($p['vencimento']) || !isset($p['tipo_pagamento'])) {
+                            throw new \Exception('Dados de parcelas inválidos ou incompletos.');
+                        }
+                    }
 
-                 // Valida o conteúdo das parcelas decodificadas antes de criar
-                 if (is_array($parcelas)) {
-                      $request->validate([
-                          'parcelas_data' => 'required|array', // Re-valida que é array
-                          'parcelas_data.*.numero' => 'required|integer|min:1',
-                          'parcelas_data.*.valor' => 'required|numeric|min:0',
-                          'parcelas_data.*.vencimento' => 'required|date_format:Y-m-d',
-                          'parcelas_data.*.tipo_pagamento' => 'required|string',
-                          'parcelas_data.*.status' => 'nullable|string',
-                      ]);
+                    // Verificar se o total das parcelas está correto
+                    $totalParcelas = array_sum(array_column($parcelasNovas, 'valor'));
+                    
+                    // Tolerância de 1 centavo na comparação
+                    if (abs($totalParcelas - $valorTotalVenda) > 0.01) {
+                        // Ajuste automático na última parcela para garantir o total exato
+                        $diferenca = $valorTotalVenda - $totalParcelas;
+                        $ultimaParcela = count($parcelasNovas) - 1;
+                        $parcelasNovas[$ultimaParcela]['valor'] += $diferenca;
+                        
+                        // Registra o ajuste no log
+                        \Log::info("Ajuste automático de R$ {$diferenca} na última parcela para igualar ao total da venda: {$valorTotalVenda}");
+                    }
 
-                      foreach ($parcelas as $p) {
-                          $venda->parcelas()->create([
-                              'numero' => $p['numero'],
-                              'valor' => $p['valor'],
-                              'vencimento' => $p['vencimento'], // Já deve vir no formato YYYY-MM-DD
-                              'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento, // Use o tipo da parcela ou o geral
-                              'status' => $p['status'] ?? 'aberto',
-                          ]);
-                      }
-                 }
-             }
-             // --- Fim Atualiza Parcelas ---
+                    // Coleta IDs de parcelas existentes
+                    $parcelasExistentesIds = $venda->parcelas->pluck('id')->toArray();
+                    
+                    // IDs de parcelas enviadas que já existem no banco
+                    $parcelasNovasIds = [];
+                    foreach ($parcelasNovas as $p) {
+                        if (isset($p['id']) && $p['id']) {
+                            $parcelasNovasIds[] = $p['id'];
+                        }
+                    }
+                    
+                    // IDs de parcelas para excluir (existentes mas não presentes nas novas)
+                    $parcelasParaRemover = array_diff($parcelasExistentesIds, $parcelasNovasIds);
+                    
+                    // Remover parcelas que não estão mais presentes
+                    if (!empty($parcelasParaRemover)) {
+                        Parcela::whereIn('id', $parcelasParaRemover)->delete();
+                    }
+                    
+                    // Atualizar ou criar parcelas
+                    foreach ($parcelasNovas as $p) {
+                        try {
+                            // Garantir que a data está no formato correto
+                            $vencimento = Carbon::parse($p['vencimento'])->format('Y-m-d');
+                            
+                            $parcelaData = [
+                                'numero' => $p['numero'],
+                                'valor' => (float)$p['valor'],
+                                'vencimento' => $vencimento,
+                                'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento,
+                                'status' => $p['status'] ?? 'aberto',
+                            ];
+                            
+                            \Log::info('Processando parcela:', [
+                                'id' => $p['id'] ?? 'nova',
+                                'data' => $parcelaData,
+                                'vencimento_original' => $p['vencimento']
+                            ]);
+                            
+                            // Se tiver ID, busca e atualiza a parcela existente
+                            if (!empty($p['id'])) {
+                                $parcela = Parcela::find($p['id']);
+                                if ($parcela) {
+                                    $parcela->numero = $parcelaData['numero'];
+                                    $parcela->valor = $parcelaData['valor'];
+                                    $parcela->vencimento = $parcelaData['vencimento'];
+                                    $parcela->tipo_pagamento = $parcelaData['tipo_pagamento'];
+                                    $parcela->status = $parcelaData['status'];
+                                    $result = $parcela->save();
+                                    
+                                    \Log::info('Parcela atualizada:', [
+                                        'id' => $parcela->id,
+                                        'resultado' => $result ? 'sucesso' : 'falha',
+                                        'nova_data' => $parcela->vencimento
+                                    ]);
+                                } else {
+                                    // Se a parcela não existir mais, cria uma nova
+                                    $novaParcela = $venda->parcelas()->create($parcelaData);
+                                    \Log::info('Parcela criada (ID não encontrado):', ['id' => $novaParcela->id]);
+                                }
+                            } else {
+                                // Cria uma nova parcela
+                                $novaParcela = $venda->parcelas()->create($parcelaData);
+                                \Log::info('Nova parcela criada:', ['id' => $novaParcela->id]);
+                            }
+                        } catch (\Exception $e) {
+                            \Log::error('Erro ao processar parcela:', [
+                                'parcela' => $p, 
+                                'erro' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString()
+                            ]);
+                            throw $e;
+                        }
+                    }
+                }
+            } else if ($request->forma_pagamento !== 'parcelado') {
+                // Se mudou para pagamento não parcelado, remove todas as parcelas
+                $venda->parcelas()->delete();
+            }
 
-             DB::commit();
-             return redirect()->route('vendas.index')->with('success', 'Venda atualizada com sucesso.');
+            DB::commit();
+            return redirect()->route('vendas.index')->with('success', 'Venda atualizada com sucesso.');
 
-         } catch (\Exception $e) {
-             DB::rollback();
-             \Log::error('Erro ao atualizar venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
-              // Retorna com os erros e input antigo
-             return back()->withErrors(['erro_salvar' => 'Erro ao atualizar venda: ' . $e->getMessage()])->withInput();
-         }
+        } catch (\Exception $e) {
+            DB::rollback();
+            \Log::error('Erro ao atualizar venda:', [
+                'exception' => $e->getMessage(), 
+                'trace' => $e->getTraceAsString(), 
+                'request' => $request->all()
+            ]);
+            return back()->withErrors(['erro_salvar' => 'Erro ao atualizar venda: ' . $e->getMessage()])->withInput();
+        }
     }
-
     public function store(Request $request)
     {
     // Primeiro, validar apenas os campos básicos e formato JSON
@@ -148,73 +243,61 @@ class VendaController extends Controller
         'parcelas_data.*.status' => 'nullable|string',
     ]);
     
-
-
         DB::beginTransaction();
 
         try {
-            // Calcular o valor total a partir dos itens recebidos
-            // Agora que o JS envia preco_final como preço unitário, o cálculo no backend está correto.
+          
             $totalVenda = 0;
-            if (!empty($itens)) { // Verifica se $itens não está vazio antes de iterar
+            if (!empty($itens)) { 
                  foreach ($itens as $itemData) {
-                     $subtotal = $itemData['quantidade'] * $itemData['preco_final']; // quantidade * preco_unitario_final
+                     $subtotal = $itemData['quantidade'] * $itemData['preco_final']; 
                      $totalVenda += $subtotal;
                  }
             }
 
 
-            // Criar a venda principal
             $venda = Venda::create([
                 'cliente_id' => $request->cliente_id,
                 'forma_pagamento' => $request->forma_pagamento,
                 'tipo_pagamento' => $request->tipo_pagamento,
-                'valor_total' => $totalVenda, // Use o total calculado
+                'valor_total' => $totalVenda, 
             ]);
 
-            // Criar itens da venda usando o relacionamento $venda->itens()
-             if (!empty($itens)) { // Verifica se $itens não está vazio antes de iterar
+             if (!empty($itens)) { 
                  foreach ($itens as $itemData) {
                      $venda->itens()->create([
                          'produto_id' => $itemData['produto_id'],
                          'quantidade' => $itemData['quantidade'],
-                         'preco_unitario' => $itemData['preco_final'], // Salva o preço unitário final
-                         'subtotal' => $itemData['quantidade'] * $itemData['preco_final'], // Salva o subtotal correto
+                         'preco_unitario' => $itemData['preco_final'], 
+                         'subtotal' => $itemData['quantidade'] * $itemData['preco_final'], 
                      ]);
                  }
              }
-
-
-            // Criar parcelas (se existirem e forma de pagamento for 'parcelado')
+          
             if ($request->forma_pagamento === 'parcelado' && !empty($parcelas)) {
-                 // A validação do conteúdo das parcelas já aconteceu acima.
                 foreach ($parcelas as $p) {
                     $venda->parcelas()->create([
                         'numero' => $p['numero'],
                         'valor' => $p['valor'],
-                        'vencimento' => $p['vencimento'], // Já deve vir no formato YYYY-MM-DD do JS
-                        'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento, // Use o tipo da parcela ou o geral
+                        'vencimento' => $p['vencimento'],
+                        'tipo_pagamento' => $p['tipo_pagamento'] ?? $request->tipo_pagamento, 
                         'status' => $p['status'] ?? 'aberto',
                     ]);
                 }
             }
 
             DB::commit();
-            // Redireciona para a lista de vendas com mensagem de sucesso
             return redirect()->route('vendas.index')->with('success', 'Venda registrada com sucesso.');
 
         } catch (\Exception $e) {
             DB::rollback();
-            // Loga o erro para debug no servidor
             \Log::error('Erro ao salvar venda: ' . $e->getMessage(), ['exception' => $e, 'request' => $request->all()]);
-             // Retorna para a página anterior com uma mensagem de erro genérica e os dados antigos
             return back()->withErrors(['erro_salvar' => 'Erro interno ao registrar venda: ' . $e->getMessage()])->withInput();
         }
     }
 
      public function storeItem(Request $request)
      {
-         // ... (código para adicionar um item individualmente, parece ok) ...
          $request->validate([
              'venda_id' => 'required|exists:vendas,id',
              'produto_id' => 'required|exists:produtos,id',
@@ -228,7 +311,7 @@ class VendaController extends Controller
          try {
              $subtotal = $request->quantidade * $request->preco_unitario;
 
-             $item = $venda->itens()->create([ // Capture o item criado se precisar
+             $item = $venda->itens()->create([ 
                  'produto_id' => $request->produto_id,
                  'quantidade' => $request->quantidade,
                  'preco_unitario' => $request->preco_unitario,
@@ -236,11 +319,11 @@ class VendaController extends Controller
              ]);
 
              // Recalcula o total da venda principal
-             $venda->valor_total = $venda->itens()->sum('subtotal'); // Soma todos os subtotais dos itens da venda
+             $venda->valor_total = $venda->itens()->sum('subtotal'); 
              $venda->save();
 
              DB::commit();
-             // Redireciona de volta para a tela de edição da venda
+            
              return redirect()->route('vendas.edit', $request->venda_id)->with('success', 'Produto adicionado à venda.');
 
          } catch (\Exception $e) {

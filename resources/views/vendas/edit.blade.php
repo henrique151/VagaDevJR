@@ -34,6 +34,8 @@
             </select>
         </div>
 
+        
+
         <h3 class="mt-5">Editar Pagamento</h3>
         <div id="editorPagamento" class="border p-3 rounded bg-light mb-4">
             <div class="row mb-3">
@@ -58,7 +60,7 @@
                     </select>
                 </div>
             </div>
-
+            <div id="avisoMensagem" class="alert alert-warning" style="display:none;"></div>
             <div id="editar_boxParcelas" style="display: {{ old('forma_pagamento', $venda->forma_pagamento) === 'parcelado' ? 'block' : 'none' }};">
                 <div class="row g-3 align-items-end mb-3">
                     <div class="col-md-3">
@@ -77,14 +79,42 @@
                 </div>
 
                 <table class="table table-striped table-bordered mt-3">
-                    <thead>
-                        <tr>
+                    <tbody id="editar_listaParcelas">
+                        <table class="table table-striped table-bordered mt-3">
+                        <thead>
+                            <tr>
                             <th>#</th>
                             <th>Data de Vencimento</th>
                             <th>Valor</th>
-                        </tr>
-                    </thead>
-                    <tbody id="editar_listaParcelas">
+                            </tr>
+                        </thead>
+                        <tbody id="editar_listaParcelas">
+                            @forelse($venda->parcelas as $p)
+                            <tr>
+                                <td>{{ $p->numero }}</td>
+                                <td>
+                                <input 
+                                    type="date" 
+                                    class="form-control" 
+                                    value="{{ $p->vencimento->format('Y-m-d') }}"
+                                    onchange="parcelasEdicao[{{ $loop->index }}].vencimento = this.value"
+                                >
+                                </td>
+                                <td>
+                                <input 
+                                    type="number" 
+                                    class="form-control" 
+                                    step="0.01" 
+                                    value="{{ number_format($p->valor, 2, '.', '') }}"
+                                    onchange="parcelasEdicao[{{ $loop->index }}].valor = parseFloat(this.value)"
+                                >
+                                </td>
+                            </tr>
+                            @empty
+                            <tr><td colspan="3" class="text-center">Nenhuma parcela cadastrada.</td></tr>
+                            @endforelse
+                        </tbody>
+                        </table>
                     </tbody>
                 </table>
             </div>
@@ -195,7 +225,14 @@
 
 @section('scripts')
 <script>
-let parcelasEdicao = {!! json_encode($venda->parcelas ?? []) !!};
+let parcelasEdicao = {!! json_encode($venda->parcelas ?? []) !!}.map(p => ({
+    id: p.id, // Importante: preservar o ID da parcela existente
+    numero: p.numero,
+    vencimento: p.vencimento,
+    valor: parseFloat(p.valor),
+    tipo_pagamento: p.tipo_pagamento,
+    status: p.status || 'aberto'
+}));
 
 document.addEventListener('DOMContentLoaded', function () {
     const formaPagamentoSelect = document.getElementById('editar_forma_pagamento');
@@ -206,6 +243,60 @@ document.addEventListener('DOMContentLoaded', function () {
     const tipoPagamentoSelect = document.getElementById('editar_tipo_pagamento');
     const formEditarVenda = document.getElementById('formEditarVendaPrincipal');
     const parcelasDataInput = document.getElementById('parcelas_data');
+    const aviso = document.getElementById('avisoMensagem');
+
+    // Função para formatar data para YYYY-MM-DD
+    function formatarData(data) {
+        if (!(data instanceof Date)) {
+            if (typeof data === 'string') {
+                // Tenta converter a string para um objeto Date
+                data = new Date(data);
+            } else {
+                return '';
+            }
+        }
+        
+        if (isNaN(data.getTime())) {
+            return '';
+        }
+        
+        const ano = data.getFullYear();
+        const mes = String(data.getMonth() + 1).padStart(2, '0');
+        const dia = String(data.getDate()).padStart(2, '0');
+        
+        return `${ano}-${mes}-${dia}`;
+    }
+
+    // Calcula o valor total da venda a partir dos itens
+    function calcularTotalDaVenda() {
+        // Esta função deve pegar o total dos itens da venda
+        // Você pode implementar uma lógica mais robusta aqui 
+        // para calcular o total com base nos itens atuais
+        
+        // Por enquanto, vamos usar o valor do elemento HTML que mostra o valor total
+        const valorTotalText = document.querySelector('h5:contains("Valor Total Atual dos Itens")');
+        if (valorTotalText) {
+            const valorString = valorTotalText.textContent.replace('Valor Total Atual dos Itens: R$ ', '').replace('.', '').replace(',', '.');
+            return parseFloat(valorString);
+        }
+        
+        // Caso não encontre o elemento, tente obter do modelo
+        const valorModeloText = document.querySelector('h5:contains("Valor Total da Venda")');
+        if (valorModeloText) {
+            const valorString = valorModeloText.textContent.replace('Valor Total da Venda (Do Modelo): R$ ', '').replace('.', '').replace(',', '.');
+            return parseFloat(valorString);
+        }
+        
+        // Se nenhum elemento for encontrado, use o valor das parcelas
+        const valorTotalValendo = document.querySelectorAll('h5')[1]; // Pegando o segundo h5 que deve ser o valor total
+        if (valorTotalValendo) {
+            const valorString = valorTotalValendo.textContent.replace(/[^0-9,]/g, '').replace(',', '.');
+            return parseFloat(valorString);
+        }
+        
+        // Se ainda assim não encontrar, calcule das próprias parcelas ou use um valor padrão
+        return parcelasEdicao.reduce((total, parcela) => total + parseFloat(parcela.valor || 0), 0) || 1000;
+    }
 
     function toggleParcelasBox() {
         if (formaPagamentoSelect.value === 'parcelado') {
@@ -217,99 +308,247 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function atualizarParcelasEditor() {
         const tbody = document.getElementById('editar_listaParcelas');
+        
+        // Limpa o conteúdo atual
         tbody.innerHTML = '';
+        
         if (parcelasEdicao.length > 0) {
             parcelasEdicao.forEach((p, index) => {
-                 const vencimentoDate = new Date(p.vencimento + 'T12:00:00');
-                 const vencimentoValue = isNaN(vencimentoDate) ? '' : vencimentoDate.toISOString().split('T')[0];
-
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${p.numero}</td>
-                        <td>
-                             <input type="date" class="form-control" value="${vencimentoValue}"
-                                    onchange="parcelasEdicao[${index}].vencimento = this.value">
-                        </td>
-                        <td>
-                            <input type="number" class="form-control" step="0.01" value="${parseFloat(p.valor).toFixed(2)}"
-                                   onchange="parcelasEdicao[${index}].valor = parseFloat(this.value)">
-                        </td>
-                    </tr>
-                `;
+                // Garante que vencimento é uma string de data válida
+                const vencimentoValue = formatarData(p.vencimento);
+                
+                // Cria uma nova linha na tabela
+                const tr = document.createElement('tr');
+                
+                // Coluna do número da parcela
+                const tdNumero = document.createElement('td');
+                tdNumero.textContent = p.numero;
+                tr.appendChild(tdNumero);
+                
+                // Coluna da data de vencimento
+                const tdVencimento = document.createElement('td');
+                const inputVencimento = document.createElement('input');
+                inputVencimento.type = 'date';
+                inputVencimento.className = 'form-control';
+                inputVencimento.value = vencimentoValue;
+                inputVencimento.setAttribute('data-index', index);
+                inputVencimento.addEventListener('change', function() {
+                    const idx = parseInt(this.getAttribute('data-index'));
+                    alterarVencimentoParcelas(idx, this);
+                });
+                tdVencimento.appendChild(inputVencimento);
+                tr.appendChild(tdVencimento);
+                
+                // Coluna do valor
+                const tdValor = document.createElement('td');
+                const inputValor = document.createElement('input');
+                inputValor.type = 'number';
+                inputValor.className = 'form-control';
+                inputValor.step = '0.01';
+                inputValor.value = parseFloat(p.valor || 0).toFixed(2);
+                inputValor.setAttribute('data-index', index);
+                inputValor.addEventListener('change', function() {
+                    const idx = parseInt(this.getAttribute('data-index'));
+                    alterarValorParcelas(idx, this);
+                });
+                tdValor.appendChild(inputValor);
+                tr.appendChild(tdValor);
+                
+                // Adiciona a linha à tabela
+                tbody.appendChild(tr);
             });
         } else {
-             tbody.innerHTML = '<tr><td colspan="3" class="text-center">Nenhuma parcela gerada.</td></tr>';
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 3;
+            td.className = 'text-center';
+            td.textContent = 'Nenhuma parcela gerada.';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
         }
     }
 
-    function calcularTotalVenda() {
-        return {{ $venda->valor_total ?? 0 }};
-    }
-
-    function ajustarUltimaParcelaEditor() {
-        const totalVenda = calcularTotalVenda();
-        if (parcelasEdicao.length === 0 || totalVenda <= 0) {
+    window.alterarVencimentoParcelas = function(index, input) {
+        const novaData = new Date(input.value);
+        
+        // Verificar se a data é válida
+        if (isNaN(novaData.getTime())) {
+            alert("Data inválida. Por favor, insira uma data válida.");
+            // Restaura a data anterior se disponível
+            if (parcelasEdicao[index] && parcelasEdicao[index].vencimento) {
+                input.value = formatarData(parcelasEdicao[index].vencimento);
+            }
             return;
         }
-        let somaAtual = 0;
-        for (let i = 0; i < parcelasEdicao.length - 1; i++) {
-             somaAtual += parseFloat(parcelasEdicao[i].valor);
+        
+        // Atualiza a data no modelo
+        parcelasEdicao[index].vencimento = formatarData(novaData);
+        
+        // Opcional: Atualizar datas futuras com base nessa alteração
+        if (index < parcelasEdicao.length - 1) {
+            const intervaloEmMeses = 1; // Intervalo entre parcelas
+            
+            for (let i = index + 1; i < parcelasEdicao.length; i++) {
+                const proximaData = new Date(novaData);
+                proximaData.setMonth(proximaData.getMonth() + (i - index) * intervaloEmMeses);
+                parcelasEdicao[i].vencimento = formatarData(proximaData);
+            }
+            
+            // Atualiza a visualização na tela
+            atualizarParcelasEditor();
         }
+    };
 
-        const restante = parseFloat((totalVenda - somaAtual).toFixed(2));
-        parcelasEdicao[parcelasEdicao.length - 1].valor = Math.max(0, restante);
+    window.alterarValorParcelas = function(index, input) {
+        const novoValor = parseFloat(input.value);
+        if (isNaN(novoValor) || novoValor < 0) {
+            input.value = parseFloat(parcelasEdicao[index].valor || 0).toFixed(2);
+            return;
+        }
+        
+        const valorAntigo = parseFloat(parcelasEdicao[index].valor || 0);
+        parcelasEdicao[index].valor = novoValor;
+        
+        // Calcular o valor total da venda
+        const totalVenda = calcularTotalDaVenda();
+        
+        // Calcular o total atual das parcelas
+        const totalParcelas = parcelasEdicao.reduce((total, parcela) => total + parseFloat(parcela.valor || 0), 0);
+        
+        // Se o total das parcelas não bate com o valor da venda, ajustar a última parcela
+        const diferenca = totalVenda - totalParcelas;
+        
+        if (Math.abs(diferenca) > 0.01) { // Tolerância de 1 centavo
+            avisoMensagem.textContent = `Ajustando a última parcela para que o total seja igual ao valor da venda (${totalVenda.toFixed(2)})`;
+            avisoMensagem.style.display = 'block';
+            
+            // Se esta é a última parcela, ajuste para o valor correto
+            if (index === parcelasEdicao.length - 1) {
+                parcelasEdicao[index].valor = novoValor + diferenca;
+            } else {
+                // Senão, ajusta a última parcela
+                const ultimoIndex = parcelasEdicao.length - 1;
+                const novoValorUltimaParcela = parseFloat(parcelasEdicao[ultimoIndex].valor || 0) + diferenca;
+                
+                // Verifica se o valor da última parcela não fica negativo
+                if (novoValorUltimaParcela < 0) {
+                    parcelasEdicao[index].valor = valorAntigo; // Reverte a alteração
+                    avisoMensagem.textContent = "Alteração inválida: tornaria a última parcela negativa.";
+                    input.value = valorAntigo.toFixed(2);
+                } else {
+                    parcelasEdicao[ultimoIndex].valor = novoValorUltimaParcela;
+                }
+            }
+        } else {
+            avisoMensagem.style.display = 'none';
+        }
+        
+        atualizarParcelasEditor();
+    };
+
+    function distribuirValorParcelas(totalVenda, qtdParcelas) {
+        const valorParcelaBase = totalVenda / qtdParcelas;
+        let valorRestante = totalVenda;
+        
+        for (let i = 0; i < qtdParcelas; i++) {
+            // Para as primeiras (n-1) parcelas, usa o valor base
+            if (i < qtdParcelas - 1) {
+                parcelasEdicao[i].valor = Math.floor(valorParcelaBase * 100) / 100; // Arredonda para baixo nos centavos
+                valorRestante -= parcelasEdicao[i].valor;
+            } else {
+                // Para a última parcela, usa o valor restante (garantindo que a soma seja exata)
+                parcelasEdicao[i].valor = Math.round(valorRestante * 100) / 100;
+            }
+        }
     }
 
-    formaPagamentoSelect.addEventListener('change', toggleParcelasBox);
-
     btnGerarParcelas.addEventListener('click', function () {
-        const totalVenda = calcularTotalVenda();
         const qtd = parseInt(qtdParcelasInput.value);
         const vencimentoInicialStr = vencimentoInicialInput.value;
         const tipoPagamento = tipoPagamentoSelect.value;
+        const totalVenda = calcularTotalDaVenda();
 
-        if (!qtd || qtd < 1 || !vencimentoInicialStr || totalVenda <= 0) {
+        if (!qtd || qtd < 1 || !vencimentoInicialStr || isNaN(totalVenda) || totalVenda <= 0) {
             alert("Por favor, preencha a quantidade de parcelas e a data do primeiro vencimento, e verifique se o valor total da venda é maior que zero.");
             return;
         }
 
         const vencimentoInicial = new Date(vencimentoInicialStr);
-        vencimentoInicial.setUTCHours(12, 0, 0, 0);
-
-        const valorParcelaBase = totalVenda / qtd;
-
+        
+        // Verifica se a data é válida
+        if (isNaN(vencimentoInicial.getTime())) {
+            alert("Data de vencimento inicial inválida. Por favor, insira uma data válida.");
+            return;
+        }
+        
+        // Inicializar array de parcelas
         parcelasEdicao = [];
 
         for (let i = 0; i < qtd; i++) {
             const venc = new Date(vencimentoInicial);
-            venc.setMonth(venc.getMonth() + i);
-            const formattedVencimento = venc.toISOString().split('T')[0];
-
+            venc.setMonth(vencimentoInicial.getMonth() + i);
+            
             parcelasEdicao.push({
                 numero: i + 1,
-                vencimento: formattedVencimento,
-                valor: parseFloat(valorParcelaBase.toFixed(2)),
+                vencimento: formatarData(venc),
+                valor: 0, 
                 tipo_pagamento: tipoPagamento,
                 status: 'aberto'
             });
         }
 
-        ajustarUltimaParcelaEditor();
+        distribuirValorParcelas(totalVenda, qtd);
         atualizarParcelasEditor();
+        
+        // Debug
+        console.log("Parcelas geradas:", JSON.stringify(parcelasEdicao));
     });
+
+    formaPagamentoSelect.addEventListener('change', toggleParcelasBox);
 
     formEditarVenda.addEventListener('submit', function(event) {
-         if (formaPagamentoSelect.value === 'parcelado') {
-             ajustarUltimaParcelaEditor();
-             parcelasDataInput.value = JSON.stringify(parcelasEdicao);
-         } else {
-              parcelasDataInput.value = '';
-         }
+        if (formaPagamentoSelect.value === 'parcelado') {
+            // Verifica se existem parcelas
+            if (parcelasEdicao.length === 0) {
+                event.preventDefault();
+                alert("Por favor, gere as parcelas antes de salvar.");
+                return;
+            }
+            
+            // Verifica se o total das parcelas corresponde ao total da venda
+            const totalVenda = calcularTotalDaVenda();
+            const totalParcelas = parcelasEdicao.reduce((total, p) => total + parseFloat(p.valor || 0), 0);
+            
+            if (Math.abs(totalVenda - totalParcelas) > 0.01) { // Tolerância de 1 centavo
+                if (confirm(`O total das parcelas (${totalParcelas.toFixed(2)}) não corresponde ao valor total da venda (${totalVenda.toFixed(2)}). Deseja ajustar automaticamente?`)) {
+                    // Ajusta a última parcela para igualar o total
+                    const diferenca = totalVenda - totalParcelas;
+                    if (parcelasEdicao.length > 0) {
+                        const ultimoIndex = parcelasEdicao.length - 1;
+                        parcelasEdicao[ultimoIndex].valor = parseFloat(parcelasEdicao[ultimoIndex].valor || 0) + diferenca;
+                    }
+                } else {
+                    event.preventDefault();
+                    return;
+                }
+            }
+            
+            // Garante que todas as parcelas têm data de vencimento no formato correto
+            for (let i = 0; i < parcelasEdicao.length; i++) {
+                parcelasEdicao[i].vencimento = formatarData(parcelasEdicao[i].vencimento);
+            }
+        }
+        
+        // Log para debugar
+        console.log("Enviando parcelas:", JSON.stringify(parcelasEdicao));
+        
+        // Quando o formulário for enviado, salvar as parcelas em JSON
+        parcelasDataInput.value = JSON.stringify(parcelasEdicao);
     });
 
+    // Inicialização
     toggleParcelasBox();
     atualizarParcelasEditor();
-    ajustarUltimaParcelaEditor();
 });
 </script>
 @endsection

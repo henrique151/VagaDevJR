@@ -22,7 +22,6 @@ class Parcela extends Model
         'vencimento' => 'date',
     ];
 
-    // *** RELACIONAMENTO CORRETO ***
     public function venda()
     {
         return $this->belongsTo(Venda::class);

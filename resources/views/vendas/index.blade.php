@@ -4,6 +4,24 @@
 <div class="container">
     <h2>Vendas Realizadas</h2>
 
+
+    <form method="GET" action="{{ route('vendas.index') }}" class="mb-4">
+    <div class="row">
+        <div class="col-md-3">
+            <input type="text" name="produto" class="form-control" placeholder="Nome do produto" value="{{ request('produto') }}">
+        </div>
+        <div class="col-md-3">
+            <input type="text" name="cpf" class="form-control" placeholder="CPF do cliente" value="{{ request('cpf') }}">
+        </div>
+        <div class="col-md-3">
+            <input type="text" name="rg" class="form-control" placeholder="RG do cliente" value="{{ request('rg') }}">
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+            <a href="{{ route('vendas.index') }}" class="btn btn-secondary">Limpar</a>
+        </div>
+    </div>
+    </form>
     @if($vendas->isEmpty())
         <p>Nenhuma venda registrada.</p>
     @else
