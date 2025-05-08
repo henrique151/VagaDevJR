@@ -12,14 +12,18 @@ return new class extends Migration
     public function up()
     {
         Schema::table('vendas', function (Blueprint $table) {
-            $table->json('parcelas')->default(json_encode([]))->change();
+            if (!Schema::hasColumn('vendas', 'parcelas')) {
+                $table->json('parcelas')->default(json_encode([]));
+            }
         });
     }
 
     public function down()
     {
         Schema::table('vendas', function (Blueprint $table) {
-            $table->json('parcelas')->nullable()->change(); // Caso precise reverter para o estado anterior
+            if (Schema::hasColumn('vendas', 'parcelas')) {
+                $table->dropColumn('parcelas');
+            }
         });
     }
 };
