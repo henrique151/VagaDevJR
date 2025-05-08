@@ -19,7 +19,7 @@ return new class extends Migration
     public function down()
     {
         Schema::table('vendas', function (Blueprint $table) {
-            $table->json('parcelas')->nullable()->change(); // Caso precise reverter para o estado anterior
+            $table->json('parcelas')->nullable()->change(); 
         });
     }
 };
